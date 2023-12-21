@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_MAX_CONCURRENT_DOWNLOAD","DEFAULT_MAX_CONCURRENT_UPLOAD"],"enum":["CertificateEncoding","ClientProtocol"],"fn":["current_platform_resolver","linux_amd64_resolver"],"struct":["Certificate","Client","ClientConfig","Config","ImageData","ImageLayer","PushResponse","TagResponse"],"trait":["ClientConfigSource"]};

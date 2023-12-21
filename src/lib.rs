@@ -7,15 +7,17 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use futures_util::{AsyncWrite, TryStream, TryStreamExt};
 use label::{InvalidLabel, Label};
-pub use oci_distribution::client as oci_client;
 use oci_distribution::{
     errors::OciDistributionError, manifest::WASM_LAYER_MEDIA_TYPE,
     secrets::RegistryAuth as OciRegistryAuth, Client as OciClient, Reference as OciReference,
 };
 pub use package::PackageRef;
-use release::{ContentHash, Release};
+pub use release::{ContentHash, Release};
 pub use semver::Version;
 use tokio_util::compat::FuturesAsyncWriteCompatExt;
+
+/// Re-exported to ease configuration.
+pub use oci_distribution::client as oci_client;
 
 /// Configuration for [`Client`].
 #[derive(Default)]
