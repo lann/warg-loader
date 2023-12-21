@@ -1207,6 +1207,7 @@ dependencies = [
  "oci-distribution",
  "semver",
  "thiserror",
+ "tokio",
  "tokio-util",
  "tracing",
 ]

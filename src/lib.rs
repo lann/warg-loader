@@ -31,6 +31,7 @@ pub struct Config {
 }
 
 /// Configuration for a specific registry.
+#[derive(Default)]
 pub struct RegistryConfig {
     /// OCI Distribution client config.
     pub oci_client_config: Option<oci_distribution::client::ClientConfig>,
@@ -55,9 +56,9 @@ impl Client {
 
     /// Returns a new client with [`Config::default_registry`] set to the
     /// given registry name.
-    pub fn with_default_registry(registry: String) -> Self {
+    pub fn with_default_registry(registry: impl Into<String>) -> Self {
         Self::new(Config {
-            default_registry: Some(registry),
+            default_registry: Some(registry.into()),
             ..Default::default()
         })
     }
@@ -69,7 +70,7 @@ impl Client {
         Pkg::Error: Into<Error>,
     {
         let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package)?;
+        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package, None)?;
 
         tracing::debug!("Listing tags for OCI reference {oci_ref:?}");
         let resp = oci_client
@@ -104,7 +105,7 @@ impl Client {
     {
         let package = package.try_into().map_err(Into::into)?;
         let version = version.into_version()?;
-        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package)?;
+        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package, Some(&version))?;
 
         tracing::debug!("Fetching image manifest for OCI reference {oci_ref:?}");
         let (manifest, _digest) = oci_client.pull_image_manifest(&oci_ref, &oci_auth).await?;
@@ -137,7 +138,7 @@ impl Client {
         Pkg::Error: Into<Error>,
     {
         let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package)?;
+        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package, None)?;
 
         oci_client
             .auth(
@@ -163,7 +164,7 @@ impl Client {
         Pkg::Error: Into<Error>,
     {
         let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package)?;
+        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package, None)?;
 
         oci_client
             .auth(
@@ -182,10 +183,14 @@ impl Client {
     fn resolve_oci_parts(
         &mut self,
         package: &PackageRef,
+        version: Option<&Version>,
     ) -> Result<(&mut OciClient, OciReference, OciRegistryAuth), Error> {
         let registry = self.registry_for_package(package)?.to_owned();
         let repo = format!("{}/{}", package.namespace(), package.name());
-        let reference = OciReference::with_tag(registry.to_owned(), repo, "latest".to_owned());
+        let tag = version
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "latest".to_owned());
+        let reference = OciReference::with_tag(registry.to_owned(), repo, tag);
         let auth = self.get_oci_auth(&registry);
         let client = self.get_oci_client(&registry)?;
         Ok((client, reference, auth))
@@ -268,4 +273,72 @@ pub enum Error {
     NoRegistryForNamespace(Label),
     #[error("invalid version: {0}")]
     VersionError(#[from] semver::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn smoke_test() {
+        const PKG: &str = "test:pkg";
+        const VER: &str = "1.0.0";
+        const CONTENT_FILE: &str = "warg-pkg.wasm";
+        const CONTENT: &[u8] = b"test content";
+
+        eprintln!("{}", "#".repeat(60));
+        eprintln!("This test expects:");
+        eprintln!("- an OCI distribution server running at localhost:5000");
+        eprintln!("- the `oras` tool to be installed");
+        eprintln!("{}", "#".repeat(60));
+
+        // Push package with `oras`
+        let tempdir = std::env::temp_dir();
+        let content_path = tempdir.join(CONTENT_FILE);
+        std::fs::write(&content_path, CONTENT).unwrap();
+        let status = Command::new("oras")
+            .current_dir(tempdir)
+            .arg("push")
+            .arg(format!(
+                "localhost:5000/{pkg}:{VER}",
+                pkg = PKG.replace(':', "/")
+            ))
+            .arg(format!("{CONTENT_FILE}:{WASM_LAYER_MEDIA_TYPE}"))
+            .status()
+            .unwrap();
+        assert!(status.success(), "{status:?}");
+
+        // Fetch package
+        let mut client = Client::new(Config {
+            default_registry: Some("localhost:5000".into()),
+            registry_configs: [(
+                "localhost:5000".into(),
+                RegistryConfig {
+                    oci_client_config: Some(oci_client::ClientConfig {
+                        protocol: oci_client::ClientProtocol::Http,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        });
+
+        let versions = client.list_all_versions("test:pkg").await.unwrap();
+        let version = versions.into_iter().next().unwrap();
+        assert_eq!(version.to_string(), VER);
+
+        let release = client.get_release("test:pkg", version).await.unwrap();
+        let content = client
+            .stream_content("test:pkg", &release.content)
+            .await
+            .unwrap()
+            .try_collect::<bytes::BytesMut>()
+            .await
+            .unwrap();
+        assert_eq!(content, CONTENT);
+    }
 }
