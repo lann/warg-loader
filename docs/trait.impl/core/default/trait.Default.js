@@ -1,3 +1,3 @@
 (function() {var implementors = {
-"warg_loader":[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"warg_loader/struct.Config.html\" title=\"struct warg_loader::Config\">Config</a>"]]
+"warg_loader":[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"warg_loader/struct.ClientConfig.html\" title=\"struct warg_loader::ClientConfig\">ClientConfig</a>"]]
 };if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

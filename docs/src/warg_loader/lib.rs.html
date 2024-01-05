@@ -269,68 +269,95 @@
 <a href="#269" id="269">269</a>
 <a href="#270" id="270">270</a>
 <a href="#271" id="271">271</a>
-</pre></div><pre class="rust"><code><span class="kw">mod </span>label;
+<a href="#272" id="272">272</a>
+<a href="#273" id="273">273</a>
+<a href="#274" id="274">274</a>
+<a href="#275" id="275">275</a>
+<a href="#276" id="276">276</a>
+<a href="#277" id="277">277</a>
+<a href="#278" id="278">278</a>
+<a href="#279" id="279">279</a>
+<a href="#280" id="280">280</a>
+<a href="#281" id="281">281</a>
+<a href="#282" id="282">282</a>
+<a href="#283" id="283">283</a>
+<a href="#284" id="284">284</a>
+<a href="#285" id="285">285</a>
+<a href="#286" id="286">286</a>
+<a href="#287" id="287">287</a>
+<a href="#288" id="288">288</a>
+<a href="#289" id="289">289</a>
+<a href="#290" id="290">290</a>
+</pre></div><pre class="rust"><code><span class="kw">mod </span>config;
+<span class="kw">mod </span>label;
+<span class="kw">mod </span>meta;
 <span class="kw">mod </span>package;
 <span class="kw">mod </span>release;
+<span class="kw">mod </span>toml;
 
 <span class="kw">use </span>std::collections::HashMap;
 
 <span class="kw">use </span>bytes::Bytes;
+<span class="kw">use </span>config::BasicCredentials;
 <span class="kw">use </span>futures_util::{AsyncWrite, TryStream, TryStreamExt};
-<span class="kw">use </span>label::{InvalidLabel, Label};
 <span class="kw">use </span>oci_distribution::{
-    errors::OciDistributionError, manifest::WASM_LAYER_MEDIA_TYPE,
-    secrets::RegistryAuth <span class="kw">as </span>OciRegistryAuth, Client <span class="kw">as </span>OciClient, Reference <span class="kw">as </span>OciReference,
+    errors::OciDistributionError, manifest::WASM_LAYER_MEDIA_TYPE, secrets::RegistryAuth,
+    Reference <span class="kw">as </span>OciReference,
 };
-<span class="kw">pub use </span>package::PackageRef;
-<span class="kw">pub use </span>release::{ContentHash, Release};
+<span class="kw">use </span>secrecy::ExposeSecret;
 <span class="kw">pub use </span>semver::Version;
 <span class="kw">use </span>tokio_util::compat::FuturesAsyncWriteCompatExt;
 
 <span class="doccomment">/// Re-exported to ease configuration.
 </span><span class="kw">pub use </span>oci_distribution::client <span class="kw">as </span>oci_client;
 
-<span class="doccomment">/// Configuration for [`Client`].
-</span><span class="attr">#[derive(Default)]
-</span><span class="kw">pub struct </span>Config {
-    <span class="doccomment">/// The default registry name.
-    </span><span class="kw">pub </span>default_registry: <span class="prelude-ty">Option</span>&lt;String&gt;,
-    <span class="doccomment">/// Per-namespace registry, overriding `default_registry` (if present).
-    </span><span class="kw">pub </span>namespace_registries: HashMap&lt;String, String&gt;,
-    <span class="doccomment">/// Per-registry configuration.
-    </span><span class="kw">pub </span>registry_configs: HashMap&lt;String, RegistryConfig&gt;,
-}
-
-<span class="doccomment">/// Configuration for a specific registry.
-</span><span class="kw">pub struct </span>RegistryConfig {
-    <span class="doccomment">/// OCI Distribution client config.
-    </span><span class="kw">pub </span>oci_client_config: <span class="prelude-ty">Option</span>&lt;oci_distribution::client::ClientConfig&gt;,
-    <span class="doccomment">/// OCI Distribution client credentials (username, password).
-    </span><span class="kw">pub </span>oci_client_credentials: <span class="prelude-ty">Option</span>&lt;(String, String)&gt;,
-}
+<span class="kw">pub use crate</span>::{
+    config::ClientConfig,
+    package::PackageRef,
+    release::{ContentHash, Release},
+};
+<span class="kw">use crate</span>::{
+    config::RegistryConfig,
+    label::{InvalidLabel, Label},
+    meta::RegistryMeta,
+};
 
 <span class="doccomment">/// A read-only registry client.
 </span><span class="kw">pub struct </span>Client {
-    config: Config,
+    config: ClientConfig,
     oci_clients: HashMap&lt;String, OciClient&gt;,
+}
+
+<span class="kw">struct </span>OciClient {
+    client: oci_distribution::Client,
+    registry: String,
+    credentials: <span class="prelude-ty">Option</span>&lt;BasicCredentials&gt;,
+}
+
+<span class="kw">impl </span>OciClient {
+    <span class="kw">fn </span>auth(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; RegistryAuth {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.credentials {
+            <span class="prelude-val">Some</span>(BasicCredentials { username, password }) =&gt; {
+                RegistryAuth::Basic(username.clone(), password.expose_secret().clone())
+            }
+            <span class="prelude-val">None </span>=&gt; RegistryAuth::Anonymous,
+        }
+    }
 }
 
 <span class="kw">impl </span>Client {
     <span class="doccomment">/// Returns a new client with the given [`Config`].
-    </span><span class="kw">pub fn </span>new(config: Config) -&gt; <span class="self">Self </span>{
+    </span><span class="kw">pub fn </span>new(config: ClientConfig) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             config,
             oci_clients: Default::default(),
         }
     }
 
-    <span class="doccomment">/// Returns a new client with [`Config::default_registry`] set to the
-    /// given registry name.
-    </span><span class="kw">pub fn </span>with_default_registry(registry: String) -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>::new(Config {
-            default_registry: <span class="prelude-val">Some</span>(registry),
-            ..Default::default()
-        })
+    <span class="doccomment">/// Returns a new client configured from the default config file path.
+    /// Returns Ok(None) if the default config file does not exist.
+    </span><span class="kw">pub fn </span>from_default_config_file() -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt;, Error&gt; {
+        <span class="prelude-val">Ok</span>(ClientConfig::from_default_file()<span class="question-mark">?</span>.map(<span class="self">Self</span>::new))
     }
 
     <span class="doccomment">/// Returns a list of all package [`Version`]s available for the given package.
@@ -340,11 +367,12 @@
         Pkg::Error: Into&lt;Error&gt;,
     {
         <span class="kw">let </span>package = package.try_into().map_err(Into::into)<span class="question-mark">?</span>;
-        <span class="kw">let </span>(oci_client, oci_ref, oci_auth) = <span class="self">self</span>.resolve_oci_parts(<span class="kw-2">&amp;</span>package)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(oci_client, oci_ref) = <span class="self">self</span>.resolve_oci_parts(<span class="kw-2">&amp;</span>package, <span class="prelude-val">None</span>).<span class="kw">await</span><span class="question-mark">?</span>;
 
         <span class="macro">tracing::debug!</span>(<span class="string">&quot;Listing tags for OCI reference {oci_ref:?}&quot;</span>);
         <span class="kw">let </span>resp = oci_client
-            .list_tags(<span class="kw-2">&amp;</span>oci_ref, <span class="kw-2">&amp;</span>oci_auth, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
+            .client
+            .list_tags(<span class="kw-2">&amp;</span>oci_ref, <span class="kw-2">&amp;</span>oci_client.auth(), <span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
             .<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="macro">tracing::trace!</span>(<span class="string">&quot;List tags response: {resp:?}&quot;</span>);
 
@@ -375,10 +403,13 @@
     {
         <span class="kw">let </span>package = package.try_into().map_err(Into::into)<span class="question-mark">?</span>;
         <span class="kw">let </span>version = version.into_version()<span class="question-mark">?</span>;
-        <span class="kw">let </span>(oci_client, oci_ref, oci_auth) = <span class="self">self</span>.resolve_oci_parts(<span class="kw-2">&amp;</span>package)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(oci_client, oci_ref) = <span class="self">self</span>.resolve_oci_parts(<span class="kw-2">&amp;</span>package, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>version)).<span class="kw">await</span><span class="question-mark">?</span>;
 
         <span class="macro">tracing::debug!</span>(<span class="string">&quot;Fetching image manifest for OCI reference {oci_ref:?}&quot;</span>);
-        <span class="kw">let </span>(manifest, _digest) = oci_client.pull_image_manifest(<span class="kw-2">&amp;</span>oci_ref, <span class="kw-2">&amp;</span>oci_auth).<span class="kw">await</span><span class="question-mark">?</span>;
+        <span class="kw">let </span>(manifest, _digest) = oci_client
+            .client
+            .pull_image_manifest(<span class="kw-2">&amp;</span>oci_ref, <span class="kw-2">&amp;</span>oci_client.auth())
+            .<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="macro">tracing::trace!</span>(<span class="string">&quot;Got manifest {manifest:?}&quot;</span>);
 
         <span class="kw">let </span>wasm_layers = manifest
@@ -408,16 +439,18 @@
         Pkg::Error: Into&lt;Error&gt;,
     {
         <span class="kw">let </span>package = package.try_into().map_err(Into::into)<span class="question-mark">?</span>;
-        <span class="kw">let </span>(oci_client, oci_ref, oci_auth) = <span class="self">self</span>.resolve_oci_parts(<span class="kw-2">&amp;</span>package)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(oci_client, oci_ref) = <span class="self">self</span>.resolve_oci_parts(<span class="kw-2">&amp;</span>package, <span class="prelude-val">None</span>).<span class="kw">await</span><span class="question-mark">?</span>;
 
         oci_client
+            .client
             .auth(
                 <span class="kw-2">&amp;</span>oci_ref,
-                <span class="kw-2">&amp;</span>oci_auth,
+                <span class="kw-2">&amp;</span>oci_client.auth(),
                 oci_distribution::RegistryOperation::Pull,
             )
             .<span class="kw">await</span><span class="question-mark">?</span>;
         oci_client
+            .client
             .pull_blob(<span class="kw-2">&amp;</span>oci_ref, <span class="kw-2">&amp;</span>content.to_string(), out.compat_write())
             .<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
@@ -434,73 +467,74 @@
         Pkg::Error: Into&lt;Error&gt;,
     {
         <span class="kw">let </span>package = package.try_into().map_err(Into::into)<span class="question-mark">?</span>;
-        <span class="kw">let </span>(oci_client, oci_ref, oci_auth) = <span class="self">self</span>.resolve_oci_parts(<span class="kw-2">&amp;</span>package)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(oci_client, oci_ref) = <span class="self">self</span>.resolve_oci_parts(<span class="kw-2">&amp;</span>package, <span class="prelude-val">None</span>).<span class="kw">await</span><span class="question-mark">?</span>;
 
         oci_client
+            .client
             .auth(
                 <span class="kw-2">&amp;</span>oci_ref,
-                <span class="kw-2">&amp;</span>oci_auth,
+                <span class="kw-2">&amp;</span>oci_client.auth(),
                 oci_distribution::RegistryOperation::Pull,
             )
             .<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">let </span>stream = oci_client
+            .client
             .pull_blob_stream(<span class="kw-2">&amp;</span>oci_ref, <span class="kw-2">&amp;</span>content.to_string())
             .<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(stream.map_err(Into::into))
     }
 
     <span class="comment">// Convenience method for resolving OCI client, reference, and auth for a package.
-    </span><span class="kw">fn </span>resolve_oci_parts(
+    </span><span class="kw">async fn </span>resolve_oci_parts(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         package: <span class="kw-2">&amp;</span>PackageRef,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(<span class="kw-2">&amp;mut </span>OciClient, OciReference, OciRegistryAuth), Error&gt; {
-        <span class="kw">let </span>registry = <span class="self">self</span>.registry_for_package(package)<span class="question-mark">?</span>.to_owned();
+        version: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Version&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(<span class="kw-2">&amp;mut </span>OciClient, OciReference), Error&gt; {
+        <span class="kw">let </span>registry = <span class="self">self</span>.config.resolve_package_registry(package)<span class="question-mark">?</span>.to_owned();
+        <span class="kw">let </span>oci_client = <span class="self">self</span>.get_oci_client(<span class="kw-2">&amp;</span>registry).<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">let </span>repo = <span class="macro">format!</span>(<span class="string">&quot;{}/{}&quot;</span>, package.namespace(), package.name());
-        <span class="kw">let </span>reference = OciReference::with_tag(registry.to_owned(), repo, <span class="string">&quot;latest&quot;</span>.to_owned());
-        <span class="kw">let </span>auth = <span class="self">self</span>.get_oci_auth(<span class="kw-2">&amp;</span>registry);
-        <span class="kw">let </span>client = <span class="self">self</span>.get_oci_client(<span class="kw-2">&amp;</span>registry)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>((client, reference, auth))
+        <span class="kw">let </span>tag = version
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| <span class="string">&quot;latest&quot;</span>.to_owned());
+        <span class="kw">let </span>reference = OciReference::with_tag(oci_client.registry.to_owned(), repo, tag);
+
+        <span class="prelude-val">Ok</span>((oci_client, reference))
     }
 
-    <span class="kw">fn </span>registry_for_package(<span class="kw-2">&amp;</span><span class="self">self</span>, package: <span class="kw-2">&amp;</span>PackageRef) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;</span>str, Error&gt; {
-        <span class="kw">let </span>namespace = package.namespace();
-        <span class="macro">tracing::debug!</span>(<span class="string">&quot;Resolving registry for {namespace:?}&quot;</span>);
-
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(registry) = <span class="self">self</span>.config.namespace_registries.get(namespace.as_ref()) {
-            <span class="macro">tracing::debug!</span>(<span class="string">&quot;Found namespace-specific registry {registry:?}&quot;</span>);
-            <span class="kw">return </span><span class="prelude-val">Ok</span>(registry);
-        }
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(registry) = <span class="kw-2">&amp;</span><span class="self">self</span>.config.default_registry {
-            <span class="macro">tracing::debug!</span>(<span class="string">&quot;No namespace-specific registry; using default {registry:?}&quot;</span>);
-            <span class="kw">return </span><span class="prelude-val">Ok</span>(registry);
-        }
-        <span class="prelude-val">Err</span>(Error::NoRegistryForNamespace(namespace.to_owned()))
-    }
-
-    <span class="kw">fn </span>get_oci_client(<span class="kw-2">&amp;mut </span><span class="self">self</span>, registry: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;mut </span>OciClient, Error&gt; {
+    <span class="kw">async fn </span>get_oci_client(<span class="kw-2">&amp;mut </span><span class="self">self</span>, registry: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;mut </span>OciClient, Error&gt; {
         <span class="kw">if </span>!<span class="self">self</span>.oci_clients.contains_key(registry) {
             <span class="macro">tracing::debug!</span>(<span class="string">&quot;Building new OCI client for {registry:?}&quot;</span>);
-            <span class="comment">// oci_distribution::ClientConfig doesn&#39;t implement Clone, so take it
-            </span><span class="kw">let </span>client_config = <span class="self">self
+
+            <span class="kw">let </span>RegistryConfig {
+                oci_client_config,
+                oci_credentials: oci_client_credentials,
+            } = <span class="self">self
                 </span>.config
                 .registry_configs
-                .get_mut(registry)
-                .and_then(|c| c.oci_client_config.take())
+                .get(registry)
+                .cloned()
                 .unwrap_or_default();
-            <span class="kw">let </span>client = client_config.try_into()<span class="question-mark">?</span>;
+            <span class="kw">let </span>client = oci_distribution::Client::new(oci_client_config.unwrap_or_default());
+
+            <span class="comment">// Check registry metadata for OCI registry override
+            </span><span class="kw">let </span>oci_registry = <span class="kw">match </span>RegistryMeta::fetch(registry).<span class="kw">await </span>{
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(meta)) =&gt; meta.oci_registry,
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>) =&gt; <span class="prelude-val">None</span>,
+                <span class="prelude-val">Err</span>(err) =&gt; {
+                    <span class="macro">tracing::warn!</span>(<span class="string">&quot;{err}&quot;</span>);
+                    <span class="prelude-val">None
+                </span>}
+            }
+            .unwrap_or_else(|| registry.to_string());
+
+            <span class="kw">let </span>client = OciClient {
+                client,
+                registry: oci_registry,
+                credentials: oci_client_credentials.clone(),
+            };
             <span class="self">self</span>.oci_clients.insert(registry.to_owned(), client);
         }
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.oci_clients.get_mut(registry).unwrap())
-    }
-
-    <span class="kw">fn </span>get_oci_auth(<span class="kw-2">&amp;</span><span class="self">self</span>, registry: <span class="kw-2">&amp;</span>str) -&gt; OciRegistryAuth {
-        <span class="kw">match </span><span class="self">self</span>.config.registry_configs.get(registry) {
-            <span class="prelude-val">Some</span>(RegistryConfig {
-                oci_client_credentials: <span class="prelude-val">Some</span>((username, password)),
-                ..
-            }) =&gt; OciRegistryAuth::Basic(username.clone(), password.clone()),
-            <span class="kw">_ </span>=&gt; OciRegistryAuth::Anonymous,
-        }
     }
 }
 
@@ -523,6 +557,8 @@
 <span class="attr">#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 </span><span class="kw">pub enum </span>Error {
+    <span class="attr">#[error(<span class="string">&quot;invalid config: {0}&quot;</span>)]
+    </span>InvalidConfig(anyhow::Error),
     <span class="attr">#[error(<span class="string">&quot;invalid content hash: {0}&quot;</span>)]
     </span>InvalidContentHash(String),
     <span class="attr">#[error(<span class="string">&quot;invalid label: {0}&quot;</span>)]
@@ -537,6 +573,8 @@
     </span>OciError(<span class="attr">#[from] </span>OciDistributionError),
     <span class="attr">#[error(<span class="string">&quot;no registry configured for namespace {0:?}&quot;</span>)]
     </span>NoRegistryForNamespace(Label),
+    <span class="attr">#[error(<span class="string">&quot;registry metadata error: {0}&quot;</span>)]
+    </span>RegistryMeta(<span class="attr">#[source] </span>anyhow::Error),
     <span class="attr">#[error(<span class="string">&quot;invalid version: {0}&quot;</span>)]
     </span>VersionError(<span class="attr">#[from] </span>semver::Error),
 }

@@ -1,66 +1,73 @@
+mod config;
 mod label;
+mod meta;
 mod package;
 mod release;
+mod toml;
 
 use std::collections::HashMap;
 
 use bytes::Bytes;
+use config::BasicCredentials;
 use futures_util::{AsyncWrite, TryStream, TryStreamExt};
-use label::{InvalidLabel, Label};
 use oci_distribution::{
-    errors::OciDistributionError, manifest::WASM_LAYER_MEDIA_TYPE,
-    secrets::RegistryAuth as OciRegistryAuth, Client as OciClient, Reference as OciReference,
+    errors::OciDistributionError, manifest::WASM_LAYER_MEDIA_TYPE, secrets::RegistryAuth,
+    Reference as OciReference,
 };
-pub use package::PackageRef;
-pub use release::{ContentHash, Release};
+use secrecy::ExposeSecret;
 pub use semver::Version;
 use tokio_util::compat::FuturesAsyncWriteCompatExt;
 
 /// Re-exported to ease configuration.
 pub use oci_distribution::client as oci_client;
 
-/// Configuration for [`Client`].
-#[derive(Default)]
-pub struct Config {
-    /// The default registry name.
-    pub default_registry: Option<String>,
-    /// Per-namespace registry, overriding `default_registry` (if present).
-    pub namespace_registries: HashMap<String, String>,
-    /// Per-registry configuration.
-    pub registry_configs: HashMap<String, RegistryConfig>,
-}
-
-/// Configuration for a specific registry.
-#[derive(Default)]
-pub struct RegistryConfig {
-    /// OCI Distribution client config.
-    pub oci_client_config: Option<oci_distribution::client::ClientConfig>,
-    /// OCI Distribution client credentials (username, password).
-    pub oci_client_credentials: Option<(String, String)>,
-}
+pub use crate::{
+    config::ClientConfig,
+    package::PackageRef,
+    release::{ContentHash, Release},
+};
+use crate::{
+    config::RegistryConfig,
+    label::{InvalidLabel, Label},
+    meta::RegistryMeta,
+};
 
 /// A read-only registry client.
 pub struct Client {
-    config: Config,
+    config: ClientConfig,
     oci_clients: HashMap<String, OciClient>,
+}
+
+struct OciClient {
+    client: oci_distribution::Client,
+    registry: String,
+    credentials: Option<BasicCredentials>,
+}
+
+impl OciClient {
+    fn auth(&self) -> RegistryAuth {
+        match &self.credentials {
+            Some(BasicCredentials { username, password }) => {
+                RegistryAuth::Basic(username.clone(), password.expose_secret().clone())
+            }
+            None => RegistryAuth::Anonymous,
+        }
+    }
 }
 
 impl Client {
     /// Returns a new client with the given [`Config`].
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: ClientConfig) -> Self {
         Self {
             config,
             oci_clients: Default::default(),
         }
     }
 
-    /// Returns a new client with [`Config::default_registry`] set to the
-    /// given registry name.
-    pub fn with_default_registry(registry: impl Into<String>) -> Self {
-        Self::new(Config {
-            default_registry: Some(registry.into()),
-            ..Default::default()
-        })
+    /// Returns a new client configured from the default config file path.
+    /// Returns Ok(None) if the default config file does not exist.
+    pub fn from_default_config_file() -> Result<Option<Self>, Error> {
+        Ok(ClientConfig::from_default_file()?.map(Self::new))
     }
 
     /// Returns a list of all package [`Version`]s available for the given package.
@@ -70,11 +77,12 @@ impl Client {
         Pkg::Error: Into<Error>,
     {
         let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package, None)?;
+        let (oci_client, oci_ref) = self.resolve_oci_parts(&package, None).await?;
 
         tracing::debug!("Listing tags for OCI reference {oci_ref:?}");
         let resp = oci_client
-            .list_tags(&oci_ref, &oci_auth, None, None)
+            .client
+            .list_tags(&oci_ref, &oci_client.auth(), None, None)
             .await?;
         tracing::trace!("List tags response: {resp:?}");
 
@@ -105,10 +113,13 @@ impl Client {
     {
         let package = package.try_into().map_err(Into::into)?;
         let version = version.into_version()?;
-        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package, Some(&version))?;
+        let (oci_client, oci_ref) = self.resolve_oci_parts(&package, Some(&version)).await?;
 
         tracing::debug!("Fetching image manifest for OCI reference {oci_ref:?}");
-        let (manifest, _digest) = oci_client.pull_image_manifest(&oci_ref, &oci_auth).await?;
+        let (manifest, _digest) = oci_client
+            .client
+            .pull_image_manifest(&oci_ref, &oci_client.auth())
+            .await?;
         tracing::trace!("Got manifest {manifest:?}");
 
         let wasm_layers = manifest
@@ -138,16 +149,18 @@ impl Client {
         Pkg::Error: Into<Error>,
     {
         let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package, None)?;
+        let (oci_client, oci_ref) = self.resolve_oci_parts(&package, None).await?;
 
         oci_client
+            .client
             .auth(
                 &oci_ref,
-                &oci_auth,
+                &oci_client.auth(),
                 oci_distribution::RegistryOperation::Pull,
             )
             .await?;
         oci_client
+            .client
             .pull_blob(&oci_ref, &content.to_string(), out.compat_write())
             .await?;
         Ok(())
@@ -164,77 +177,74 @@ impl Client {
         Pkg::Error: Into<Error>,
     {
         let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref, oci_auth) = self.resolve_oci_parts(&package, None)?;
+        let (oci_client, oci_ref) = self.resolve_oci_parts(&package, None).await?;
 
         oci_client
+            .client
             .auth(
                 &oci_ref,
-                &oci_auth,
+                &oci_client.auth(),
                 oci_distribution::RegistryOperation::Pull,
             )
             .await?;
         let stream = oci_client
+            .client
             .pull_blob_stream(&oci_ref, &content.to_string())
             .await?;
         Ok(stream.map_err(Into::into))
     }
 
     // Convenience method for resolving OCI client, reference, and auth for a package.
-    fn resolve_oci_parts(
+    async fn resolve_oci_parts(
         &mut self,
         package: &PackageRef,
         version: Option<&Version>,
-    ) -> Result<(&mut OciClient, OciReference, OciRegistryAuth), Error> {
-        let registry = self.registry_for_package(package)?.to_owned();
+    ) -> Result<(&mut OciClient, OciReference), Error> {
+        let registry = self.config.resolve_package_registry(package)?.to_owned();
+        let oci_client = self.get_oci_client(&registry).await?;
         let repo = format!("{}/{}", package.namespace(), package.name());
         let tag = version
             .map(|v| v.to_string())
             .unwrap_or_else(|| "latest".to_owned());
-        let reference = OciReference::with_tag(registry.to_owned(), repo, tag);
-        let auth = self.get_oci_auth(&registry);
-        let client = self.get_oci_client(&registry)?;
-        Ok((client, reference, auth))
+        let reference = OciReference::with_tag(oci_client.registry.to_owned(), repo, tag);
+
+        Ok((oci_client, reference))
     }
 
-    fn registry_for_package(&self, package: &PackageRef) -> Result<&str, Error> {
-        let namespace = package.namespace();
-        tracing::debug!("Resolving registry for {namespace:?}");
-
-        if let Some(registry) = self.config.namespace_registries.get(namespace.as_ref()) {
-            tracing::debug!("Found namespace-specific registry {registry:?}");
-            return Ok(registry);
-        }
-        if let Some(registry) = &self.config.default_registry {
-            tracing::debug!("No namespace-specific registry; using default {registry:?}");
-            return Ok(registry);
-        }
-        Err(Error::NoRegistryForNamespace(namespace.to_owned()))
-    }
-
-    fn get_oci_client(&mut self, registry: &str) -> Result<&mut OciClient, Error> {
+    async fn get_oci_client(&mut self, registry: &str) -> Result<&mut OciClient, Error> {
         if !self.oci_clients.contains_key(registry) {
             tracing::debug!("Building new OCI client for {registry:?}");
-            // oci_distribution::ClientConfig doesn't implement Clone, so take it
-            let client_config = self
+
+            let RegistryConfig {
+                oci_client_config,
+                oci_credentials: oci_client_credentials,
+            } = self
                 .config
                 .registry_configs
-                .get_mut(registry)
-                .and_then(|c| c.oci_client_config.take())
+                .get(registry)
+                .cloned()
                 .unwrap_or_default();
-            let client = client_config.try_into()?;
+            let client = oci_distribution::Client::new(oci_client_config.unwrap_or_default());
+
+            // Check registry metadata for OCI registry override
+            let oci_registry = match RegistryMeta::fetch(registry).await {
+                Ok(Some(meta)) => meta.oci_registry,
+                Ok(None) => None,
+                Err(err) => {
+                    tracing::warn!("{err}");
+                    None
+                }
+            }
+            .unwrap_or_else(|| registry.to_string());
+
+            let client = OciClient {
+                client,
+                registry: oci_registry,
+                credentials: oci_client_credentials.clone(),
+            };
             self.oci_clients.insert(registry.to_owned(), client);
         }
         Ok(self.oci_clients.get_mut(registry).unwrap())
-    }
-
-    fn get_oci_auth(&self, registry: &str) -> OciRegistryAuth {
-        match self.config.registry_configs.get(registry) {
-            Some(RegistryConfig {
-                oci_client_credentials: Some((username, password)),
-                ..
-            }) => OciRegistryAuth::Basic(username.clone(), password.clone()),
-            _ => OciRegistryAuth::Anonymous,
-        }
     }
 }
 
@@ -257,6 +267,8 @@ impl IntoVersion for &str {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("invalid config: {0}")]
+    InvalidConfig(anyhow::Error),
     #[error("invalid content hash: {0}")]
     InvalidContentHash(String),
     #[error("invalid label: {0}")]
@@ -271,74 +283,8 @@ pub enum Error {
     OciError(#[from] OciDistributionError),
     #[error("no registry configured for namespace {0:?}")]
     NoRegistryForNamespace(Label),
+    #[error("registry metadata error: {0}")]
+    RegistryMeta(#[source] anyhow::Error),
     #[error("invalid version: {0}")]
     VersionError(#[from] semver::Error),
-}
-
-#[cfg(test)]
-mod tests {
-    use std::process::Command;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn smoke_test() {
-        const PKG: &str = "test:pkg";
-        const VER: &str = "1.0.0";
-        const CONTENT_FILE: &str = "warg-pkg.wasm";
-        const CONTENT: &[u8] = b"test content";
-
-        eprintln!("{}", "#".repeat(60));
-        eprintln!("This test expects:");
-        eprintln!("- an OCI distribution server running at localhost:5000");
-        eprintln!("- the `oras` tool to be installed");
-        eprintln!("{}", "#".repeat(60));
-
-        // Push package with `oras`
-        let tempdir = std::env::temp_dir();
-        let content_path = tempdir.join(CONTENT_FILE);
-        std::fs::write(&content_path, CONTENT).unwrap();
-        let status = Command::new("oras")
-            .current_dir(tempdir)
-            .arg("push")
-            .arg(format!(
-                "localhost:5000/{pkg}:{VER}",
-                pkg = PKG.replace(':', "/")
-            ))
-            .arg(format!("{CONTENT_FILE}:{WASM_LAYER_MEDIA_TYPE}"))
-            .status()
-            .unwrap();
-        assert!(status.success(), "{status:?}");
-
-        // Fetch package
-        let mut client = Client::new(Config {
-            default_registry: Some("localhost:5000".into()),
-            registry_configs: [(
-                "localhost:5000".into(),
-                RegistryConfig {
-                    oci_client_config: Some(oci_client::ClientConfig {
-                        protocol: oci_client::ClientProtocol::Http,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )]
-            .into(),
-            ..Default::default()
-        });
-
-        let versions = client.list_all_versions("test:pkg").await.unwrap();
-        let version = versions.into_iter().next().unwrap();
-        assert_eq!(version.to_string(), VER);
-
-        let release = client.get_release("test:pkg", version).await.unwrap();
-        let content = client
-            .stream_content("test:pkg", &release.content)
-            .await
-            .unwrap()
-            .try_collect::<bytes::BytesMut>()
-            .await
-            .unwrap();
-        assert_eq!(content, CONTENT);
-    }
 }
