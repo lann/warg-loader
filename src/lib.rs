@@ -56,7 +56,7 @@ impl OciClient {
 }
 
 impl Client {
-    /// Returns a new client with the given [`Config`].
+    /// Returns a new client with the given [`ClientConfig`].
     pub fn new(config: ClientConfig) -> Self {
         Self {
             config,
