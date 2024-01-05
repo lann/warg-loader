@@ -2,6 +2,21 @@
 
 A minimal Warg Package Registry interface for read-only consumers.
 
+## CLI
+
+`warg-loader` is intended to be used primarily as a library, but it also
+provides a simple CLI interface:
+
+```console
+$ warg-loader localhost:5000 test:pkg
+Package: test:pkg
+Versions:
+  1.0.0
+$ warg-loader localhost:5000 fetch 1.0.0
+Fetching release details for test:pkg@1.0.0...
+Downloading content to "test-pkg-1.0.0.wasm"...
+```
+
 ## Running Tests
 
 The e2e tests require:

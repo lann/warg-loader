@@ -8,7 +8,7 @@ use secrecy::SecretString;
 use crate::{Error, PackageRef};
 
 /// Configuration for [`super::Client`].
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ClientConfig {
     /// The default registry name.
     default_registry: Option<String>,
@@ -19,6 +19,10 @@ pub struct ClientConfig {
 }
 
 impl ClientConfig {
+    pub fn to_client(&self) -> crate::Client {
+        crate::Client::new(self.clone())
+    }
+
     pub fn default_registry(&mut self, registry: impl Into<String>) -> &mut Self {
         self.default_registry = Some(registry.into());
         self

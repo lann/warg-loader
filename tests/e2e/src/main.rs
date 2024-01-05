@@ -50,13 +50,14 @@ async fn fetch_smoke_test() {
         .unwrap();
     let mut client = Client::new(client_config);
 
-    let versions = client.list_all_versions("test:pkg").await.unwrap();
+    let package = FIXTURE_PACKAGE.parse().unwrap();
+    let versions = client.list_all_versions(&package).await.unwrap();
     let version = versions.into_iter().next().unwrap();
     assert_eq!(version.to_string(), FIXTURE_VERSION);
 
-    let release = client.get_release("test:pkg", version).await.unwrap();
+    let release = client.get_release(&package, &version).await.unwrap();
     let content = client
-        .stream_content("test:pkg", &release.content)
+        .stream_content(&package, &release.content)
         .await
         .unwrap()
         .try_collect::<bytes::BytesMut>()

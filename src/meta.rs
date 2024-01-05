@@ -6,7 +6,7 @@ use crate::Error;
 
 const WELL_KNOWN_PATH: &str = ".well-known/warg/registry.json";
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryMeta {
     pub oci_registry: Option<String>,
@@ -22,6 +22,7 @@ impl RegistryMeta {
     }
 
     async fn fetch_url(url: &str) -> anyhow::Result<Option<Self>> {
+        tracing::debug!("Fetching registry metadata from {url:?}");
         let resp = reqwest::get(url).await?;
         if resp.status() == StatusCode::NOT_FOUND {
             return Ok(None);

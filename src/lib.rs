@@ -71,13 +71,8 @@ impl Client {
     }
 
     /// Returns a list of all package [`Version`]s available for the given package.
-    pub async fn list_all_versions<Pkg>(&mut self, package: Pkg) -> Result<Vec<Version>, Error>
-    where
-        Pkg: TryInto<PackageRef>,
-        Pkg::Error: Into<Error>,
-    {
-        let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref) = self.resolve_oci_parts(&package, None).await?;
+    pub async fn list_all_versions(&mut self, package: &PackageRef) -> Result<Vec<Version>, Error> {
+        let (oci_client, oci_ref) = self.resolve_oci_parts(package, None).await?;
 
         tracing::debug!("Listing tags for OCI reference {oci_ref:?}");
         let resp = oci_client
@@ -102,18 +97,12 @@ impl Client {
     }
 
     /// Returns a [`Release`] for the given package version.
-    pub async fn get_release<Pkg>(
+    pub async fn get_release(
         &mut self,
-        package: Pkg,
-        version: impl IntoVersion,
-    ) -> Result<Release, Error>
-    where
-        Pkg: TryInto<PackageRef>,
-        Pkg::Error: Into<Error>,
-    {
-        let package = package.try_into().map_err(Into::into)?;
-        let version = version.into_version()?;
-        let (oci_client, oci_ref) = self.resolve_oci_parts(&package, Some(&version)).await?;
+        package: &PackageRef,
+        version: &Version,
+    ) -> Result<Release, Error> {
+        let (oci_client, oci_ref) = self.resolve_oci_parts(package, Some(version)).await?;
 
         tracing::debug!("Fetching image manifest for OCI reference {oci_ref:?}");
         let (manifest, _digest) = oci_client
@@ -133,23 +122,19 @@ impl Client {
                 wasm_layers.len()
             )));
         }
+        let version = version.clone();
         let content = wasm_layers[0].digest.parse()?;
         Ok(Release { version, content })
     }
 
     /// Copies content into the given [`AsyncWrite`].
-    pub async fn copy_content<Pkg>(
+    pub async fn copy_content(
         &mut self,
-        package: Pkg,
+        package: &PackageRef,
         content: &ContentHash,
         out: impl AsyncWrite + Unpin,
-    ) -> Result<(), Error>
-    where
-        Pkg: TryInto<PackageRef>,
-        Pkg::Error: Into<Error>,
-    {
-        let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref) = self.resolve_oci_parts(&package, None).await?;
+    ) -> Result<(), Error> {
+        let (oci_client, oci_ref) = self.resolve_oci_parts(package, None).await?;
 
         oci_client
             .client
@@ -167,17 +152,12 @@ impl Client {
     }
 
     /// Returns a [`TryStream`] of content chunks.
-    pub async fn stream_content<Pkg>(
+    pub async fn stream_content(
         &mut self,
-        package: Pkg,
+        package: &PackageRef,
         content: &ContentHash,
-    ) -> Result<impl TryStream<Ok = Bytes, Error = Error>, Error>
-    where
-        Pkg: TryInto<PackageRef>,
-        Pkg::Error: Into<Error>,
-    {
-        let package = package.try_into().map_err(Into::into)?;
-        let (oci_client, oci_ref) = self.resolve_oci_parts(&package, None).await?;
+    ) -> Result<impl TryStream<Ok = Bytes, Error = Error>, Error> {
+        let (oci_client, oci_ref) = self.resolve_oci_parts(package, None).await?;
 
         oci_client
             .client
@@ -228,8 +208,14 @@ impl Client {
 
             // Check registry metadata for OCI registry override
             let oci_registry = match RegistryMeta::fetch(registry).await {
-                Ok(Some(meta)) => meta.oci_registry,
-                Ok(None) => None,
+                Ok(Some(meta)) => {
+                    tracing::debug!("Got registry metadata {meta:?}");
+                    meta.oci_registry
+                }
+                Ok(None) => {
+                    tracing::debug!("Metadata not found");
+                    None
+                }
                 Err(err) => {
                     tracing::warn!("{err}");
                     None
@@ -245,22 +231,6 @@ impl Client {
             self.oci_clients.insert(registry.to_owned(), client);
         }
         Ok(self.oci_clients.get_mut(registry).unwrap())
-    }
-}
-
-pub trait IntoVersion {
-    fn into_version(self) -> Result<Version, Error>;
-}
-
-impl IntoVersion for Version {
-    fn into_version(self) -> Result<Version, Error> {
-        Ok(self)
-    }
-}
-
-impl IntoVersion for &str {
-    fn into_version(self) -> Result<Version, Error> {
-        Ok(Version::parse(self)?)
     }
 }
 

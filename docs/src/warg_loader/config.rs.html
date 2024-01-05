@@ -99,6 +99,10 @@
 <a href="#99" id="99">99</a>
 <a href="#100" id="100">100</a>
 <a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
 </pre></div><pre class="rust"><code><span class="kw">mod </span>toml;
 
 <span class="kw">use </span>std::collections::HashMap;
@@ -109,7 +113,7 @@
 <span class="kw">use crate</span>::{Error, PackageRef};
 
 <span class="doccomment">/// Configuration for [`super::Client`].
-</span><span class="attr">#[derive(Default)]
+</span><span class="attr">#[derive(Clone, Default)]
 </span><span class="kw">pub struct </span>ClientConfig {
     <span class="doccomment">/// The default registry name.
     </span>default_registry: <span class="prelude-ty">Option</span>&lt;String&gt;,
@@ -120,6 +124,10 @@
 }
 
 <span class="kw">impl </span>ClientConfig {
+    <span class="kw">pub fn </span>to_client(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">crate</span>::Client {
+        <span class="kw">crate</span>::Client::new(<span class="self">self</span>.clone())
+    }
+
     <span class="kw">pub fn </span>default_registry(<span class="kw-2">&amp;mut </span><span class="self">self</span>, registry: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="kw-2">&amp;mut </span><span class="self">Self </span>{
         <span class="self">self</span>.default_registry = <span class="prelude-val">Some</span>(registry.into());
         <span class="self">self

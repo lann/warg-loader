@@ -108,7 +108,7 @@ as a String.</p>
     digest: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
     out: T
 ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, <a class="enum" href="https://docs.rs/oci-distribution/0.10.0/oci_distribution/errors/enum.OciDistributionError.html" title="enum oci_distribution::errors::OciDistributionError">OciDistributionError</a>&gt;<span class="where fmt-newline">where
-    T: AsyncWrite + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Unpin.html" title="trait core::marker::Unpin">Unpin</a>,</span></h4></section></summary><div class="docblock"><p>Pull a single layer from an OCI registry.</p>
+    T: <a class="trait" href="https://docs.rs/tokio/1.35.1/tokio/io/async_write/trait.AsyncWrite.html" title="trait tokio::io::async_write::AsyncWrite">AsyncWrite</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Unpin.html" title="trait core::marker::Unpin">Unpin</a>,</span></h4></section></summary><div class="docblock"><p>Pull a single layer from an OCI registry.</p>
 <p>This pulls the layer for a particular image that is identified by
 the given digest. The image reference is used to find the
 repository and the registry, but it is not used to verify that
