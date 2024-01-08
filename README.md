@@ -53,3 +53,6 @@ $ oras push \
     localhost:5000/my-namespace/my-pkg:1.0.0 \
     component.wasm:application/vnd.wasm.content.layer.v1+wasm
 ```
+
+> Note: Some registry implementations may require `--image-spec v1.0` for
+> compatibility with this example.
