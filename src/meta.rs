@@ -6,10 +6,11 @@ use crate::Error;
 
 const WELL_KNOWN_PATH: &str = ".well-known/warg/registry.json";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryMeta {
     pub oci_registry: Option<String>,
+    pub oci_namespace_prefix: Option<String>,
 }
 
 impl RegistryMeta {

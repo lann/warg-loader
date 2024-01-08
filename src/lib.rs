@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use config::BasicCredentials;
+use docker_credential::{CredentialRetrievalError, DockerCredential};
 use futures_util::{AsyncWrite, TryStream, TryStreamExt};
 use oci_distribution::{
     errors::OciDistributionError, manifest::WASM_LAYER_MEDIA_TYPE, secrets::RegistryAuth,
@@ -41,17 +42,36 @@ pub struct Client {
 struct OciClient {
     client: oci_distribution::Client,
     registry: String,
+    namespace_prefix: Option<String>,
     credentials: Option<BasicCredentials>,
 }
 
 impl OciClient {
-    fn auth(&self) -> RegistryAuth {
-        match &self.credentials {
-            Some(BasicCredentials { username, password }) => {
-                RegistryAuth::Basic(username.clone(), password.expose_secret().clone())
-            }
-            None => RegistryAuth::Anonymous,
+    fn get_auth(&self) -> Result<RegistryAuth, Error> {
+        if let Some(BasicCredentials { username, password }) = &self.credentials {
+            return Ok(RegistryAuth::Basic(
+                username.clone(),
+                password.expose_secret().clone(),
+            ));
         }
+
+        match docker_credential::get_credential(&self.registry) {
+            Ok(DockerCredential::UsernamePassword(username, password)) => {
+                return Ok(RegistryAuth::Basic(username, password));
+            }
+            Ok(DockerCredential::IdentityToken(_)) => {
+                return Err(Error::CredentialError(anyhow::anyhow!(
+                    "identity tokens not supported"
+                )));
+            }
+            Err(
+                CredentialRetrievalError::ConfigNotFound
+                | CredentialRetrievalError::NoCredentialConfigured,
+            ) => (),
+            Err(err) => return Err(Error::CredentialError(err.into())),
+        }
+
+        Ok(RegistryAuth::Anonymous)
     }
 }
 
@@ -77,7 +97,7 @@ impl Client {
         tracing::debug!("Listing tags for OCI reference {oci_ref:?}");
         let resp = oci_client
             .client
-            .list_tags(&oci_ref, &oci_client.auth(), None, None)
+            .list_tags(&oci_ref, &oci_client.get_auth()?, None, None)
             .await?;
         tracing::trace!("List tags response: {resp:?}");
 
@@ -107,7 +127,7 @@ impl Client {
         tracing::debug!("Fetching image manifest for OCI reference {oci_ref:?}");
         let (manifest, _digest) = oci_client
             .client
-            .pull_image_manifest(&oci_ref, &oci_client.auth())
+            .pull_image_manifest(&oci_ref, &oci_client.get_auth()?)
             .await?;
         tracing::trace!("Got manifest {manifest:?}");
 
@@ -140,7 +160,7 @@ impl Client {
             .client
             .auth(
                 &oci_ref,
-                &oci_client.auth(),
+                &oci_client.get_auth()?,
                 oci_distribution::RegistryOperation::Pull,
             )
             .await?;
@@ -163,7 +183,7 @@ impl Client {
             .client
             .auth(
                 &oci_ref,
-                &oci_client.auth(),
+                &oci_client.get_auth()?,
                 oci_distribution::RegistryOperation::Pull,
             )
             .await?;
@@ -182,7 +202,12 @@ impl Client {
     ) -> Result<(&mut OciClient, OciReference), Error> {
         let registry = self.config.resolve_package_registry(package)?.to_owned();
         let oci_client = self.get_oci_client(&registry).await?;
-        let repo = format!("{}/{}", package.namespace(), package.name());
+        let repo = format!(
+            "{}{}/{}",
+            oci_client.namespace_prefix.as_deref().unwrap_or_default(),
+            package.namespace(),
+            package.name()
+        );
         let tag = version
             .map(|v| v.to_string())
             .unwrap_or_else(|| "latest".to_owned());
@@ -207,25 +232,29 @@ impl Client {
             let client = oci_distribution::Client::new(oci_client_config.unwrap_or_default());
 
             // Check registry metadata for OCI registry override
-            let oci_registry = match RegistryMeta::fetch(registry).await {
+            let registry_meta = match RegistryMeta::fetch(registry).await {
                 Ok(Some(meta)) => {
                     tracing::debug!("Got registry metadata {meta:?}");
-                    meta.oci_registry
+                    meta
                 }
                 Ok(None) => {
                     tracing::debug!("Metadata not found");
-                    None
+                    Default::default()
                 }
                 Err(err) => {
-                    tracing::warn!("{err}");
-                    None
+                    tracing::warn!("Error fetching registry metadata: {err}");
+                    Default::default()
                 }
-            }
-            .unwrap_or_else(|| registry.to_string());
+            };
+
+            let oci_registry = registry_meta
+                .oci_registry
+                .unwrap_or_else(|| registry.to_string());
 
             let client = OciClient {
                 client,
                 registry: oci_registry,
+                namespace_prefix: registry_meta.oci_namespace_prefix,
                 credentials: oci_client_credentials.clone(),
             };
             self.oci_clients.insert(registry.to_owned(), client);
@@ -237,6 +266,8 @@ impl Client {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("failed to get registry credentials: {0}")]
+    CredentialError(anyhow::Error),
     #[error("invalid config: {0}")]
     InvalidConfig(anyhow::Error),
     #[error("invalid content hash: {0}")]
