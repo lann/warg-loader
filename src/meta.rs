@@ -15,7 +15,12 @@ pub struct RegistryMeta {
 
 impl RegistryMeta {
     pub async fn fetch(domain: &str) -> Result<Option<Self>, Error> {
-        let url = format!("https://{domain}/{WELL_KNOWN_PATH}");
+        let scheme = if domain.starts_with("localhost:") {
+            "http"
+        } else {
+            "https"
+        };
+        let url = format!("{scheme}://{domain}/{WELL_KNOWN_PATH}");
         Self::fetch_url(&url)
             .await
             .with_context(|| format!("error fetching registry metadata from {url:?}"))
