@@ -12,8 +12,7 @@ use config::BasicCredentials;
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use futures_util::{AsyncWrite, TryStream, TryStreamExt};
 use oci_distribution::{
-    errors::OciDistributionError, manifest::WASM_LAYER_MEDIA_TYPE, secrets::RegistryAuth,
-    Reference as OciReference,
+    errors::OciDistributionError, secrets::RegistryAuth, Reference as OciReference,
 };
 use secrecy::ExposeSecret;
 pub use semver::Version;
@@ -32,6 +31,11 @@ use crate::{
     label::{InvalidLabel, Label},
     meta::RegistryMeta,
 };
+
+const WASM_LAYER_MEDIA_TYPES: &[&str] = &[
+    "application/wasm",
+    "application/vnd.wasm.content.layer.v1+wasm",
+];
 
 /// A read-only registry client.
 pub struct Client {
@@ -131,10 +135,13 @@ impl Client {
             .await?;
         tracing::trace!("Got manifest {manifest:?}");
 
+        // Pending standardization of an OCI manifest/config format, a package
+        // artifact must contain exactly one layer with a known wasm media type
+        // (other non-wasm layers may be present as well).
         let wasm_layers = manifest
             .layers
             .into_iter()
-            .filter(|layer| layer.media_type == WASM_LAYER_MEDIA_TYPE)
+            .filter(|layer| WASM_LAYER_MEDIA_TYPES.contains(&layer.media_type.as_str()))
             .collect::<Vec<_>>();
         if wasm_layers.len() != 1 {
             return Err(Error::InvalidPackageManifest(format!(
