@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use anyhow::{bail, ensure, Context};
-use tokio_util::compat::TokioAsyncWriteCompatExt;
+use futures_util::TryStreamExt;
+use tokio::io::AsyncWriteExt;
 use warg_loader::{Client, ClientConfig, PackageRef, Release, Version};
 
 #[tokio::main(flavor = "current_thread")]
@@ -110,9 +111,12 @@ async fn fetch_package_content(
         !Path::new(&filename).exists(),
         "{filename:?} already exists"
     );
-    let file = tokio::fs::File::create(filename).await?;
-    client
-        .copy_content(&package, &release.content, file.compat_write())
-        .await?;
+    let mut content_stream = client.stream_content(&package, &release.content).await?;
+
+    let mut file = tokio::fs::File::create(filename).await?;
+    while let Some(chunk) = content_stream.try_next().await? {
+        file.write_all(&chunk).await?;
+    }
+
     Ok(())
 }
