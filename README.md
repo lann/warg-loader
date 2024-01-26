@@ -8,13 +8,13 @@ A minimal Warg Package Registry interface for read-only consumers.
 provides a simple CLI interface:
 
 ```console
-$ warg-loader localhost:5000 test:pkg
-Package: test:pkg
+$ warg-loader wasi:preview1-command-adapter
+Package: wasi:preview1-command-adapter
 Versions:
-  1.0.0
-$ warg-loader localhost:5000 fetch 1.0.0
-Fetching release details for test:pkg@1.0.0...
-Downloading content to "test-pkg-1.0.0.wasm"...
+  0.2.0
+$ warg-loader wasi:preview-command-adapter fetch 0.2.0
+Fetching release details for wasi:preview1-command-adapter@0.2.0...
+Downloading content to "wasi-preview1-command-adapter-0.2.0.wasm"...
 ```
 
 ## Running Tests
@@ -46,12 +46,12 @@ CLI tool can be used to publish packages:
 ```console
 $ oras push \
     "${OCI_REGISTRY}/${WARG_NAMESPACE}/${PACKAGE_MAME}:${SEMVER}" \
-    "${WASM_FILE}:application/vnd.wasm.content.layer.v1+wasm"
+    "${WASM_FILE}:application/wasm"
 
 # e.g. to push `component.wasm` as "my-namespace:my-pkg@1.0.0" to `localhost:5000`:
 $ oras push \
     localhost:5000/my-namespace/my-pkg:1.0.0 \
-    component.wasm:application/vnd.wasm.content.layer.v1+wasm
+    component.wasm:application/wasm
 ```
 
 > Note: Some registry implementations may require `--image-spec v1.0` for
