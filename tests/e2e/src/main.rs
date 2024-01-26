@@ -57,7 +57,7 @@ async fn fetch_smoke_test() {
 
     let release = client.get_release(&package, &version).await.unwrap();
     let content = client
-        .stream_content(&package, &release.content)
+        .stream_content(&package, &release.content_digest)
         .await
         .unwrap()
         .try_collect::<bytes::BytesMut>()

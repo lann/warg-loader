@@ -53,12 +53,15 @@ async fn show_package_info(
     version: Option<Version>,
 ) -> anyhow::Result<()> {
     if let Some(version) = version {
-        let Release { version, content } = client
+        let Release {
+            version,
+            content_digest,
+        } = client
             .get_release(&package, &version)
             .await
             .with_context(|| format!("error resolving {package}@{version}"))?;
         println!("Release: {package}@{version}");
-        println!("Content hash: {content}");
+        println!("Content digest: {content_digest}");
     } else {
         let mut versions = client
             .list_all_versions(&package)
@@ -111,7 +114,9 @@ async fn fetch_package_content(
         !Path::new(&filename).exists(),
         "{filename:?} already exists"
     );
-    let mut content_stream = client.stream_content(&package, &release.content).await?;
+    let mut content_stream = client
+        .stream_content(&package, &release.content_digest)
+        .await?;
 
     let mut file = tokio::fs::File::create(filename).await?;
     while let Some(chunk) = content_stream.try_next().await? {

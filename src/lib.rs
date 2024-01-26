@@ -21,7 +21,7 @@ pub use oci_distribution::client as oci_client;
 pub use crate::{
     config::ClientConfig,
     package::PackageRef,
-    release::{ContentHash, Release},
+    release::{ContentDigest, Release},
 };
 use crate::{
     label::{InvalidLabel, Label},
@@ -47,7 +47,7 @@ trait PackageSource {
     async fn stream_content(
         &mut self,
         package: &PackageRef,
-        content: &ContentHash,
+        content: &Digest,
     ) -> Result<BoxStream<Result<Bytes, Error>>, Error>;
 }
 
@@ -82,11 +82,11 @@ impl Client {
         source.get_release(package, version).await
     }
 
-    /// Returns a [`TryStream`] of content chunks.
+    /// Returns a [`BoxStream`] of content chunks.
     pub async fn stream_content(
         &mut self,
         package: &PackageRef,
-        content: &ContentHash,
+        content: &Digest,
     ) -> Result<BoxStream<Result<Bytes, Error>>, Error> {
         let source = self.resolve_source(package).await?;
         source.stream_content(package, content).await
@@ -141,8 +141,8 @@ pub enum Error {
     CredentialError(anyhow::Error),
     #[error("invalid config: {0}")]
     InvalidConfig(anyhow::Error),
-    #[error("invalid content hash: {0}")]
-    InvalidContentHash(String),
+    #[error("invalid content digest: {0}")]
+    InvalidContentDigest(String),
     #[error("invalid label: {0}")]
     InvalidLabel(#[from] InvalidLabel),
     #[error("invalid package ref: {0}")]

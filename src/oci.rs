@@ -9,7 +9,7 @@ use semver::Version;
 use crate::{
     config::{BasicCredentials, RegistryConfig},
     meta::RegistryMeta,
-    ContentHash, Error, PackageRef, PackageSource, Release,
+    Digest, Error, PackageRef, PackageSource, Release,
 };
 
 const WASM_LAYER_MEDIA_TYPES: &[&str] = &[
@@ -144,14 +144,17 @@ impl PackageSource for OciSource {
             )));
         }
         let version = version.clone();
-        let content = wasm_layers[0].digest.parse()?;
-        Ok(Release { version, content })
+        let content_digest = wasm_layers[0].digest.parse()?;
+        Ok(Release {
+            version,
+            content_digest,
+        })
     }
 
     async fn stream_content(
         &mut self,
         package: &PackageRef,
-        content: &ContentHash,
+        content: &Digest,
     ) -> Result<BoxStream<Result<Bytes, Error>>, Error> {
         let reference = self.make_reference(package, None);
         self.client
