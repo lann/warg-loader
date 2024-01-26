@@ -1,7 +1,11 @@
 [package]
 name = "warg-loader"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
+description = "Warg package loader"
+license = "Apache-2.0"
+documentation = "https://docs.rs/warg-loader"
+repository = "https://github.com/lann/warg-loader"
 
 [dependencies]
 anyhow = "1.0.79"
