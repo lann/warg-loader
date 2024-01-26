@@ -1,4 +1,8 @@
+use std::path::Path;
+
 use semver::Version;
+use sha2::{Digest, Sha256};
+use tokio::io::AsyncReadExt;
 
 use crate::Error;
 
@@ -11,6 +15,22 @@ pub struct Release {
 #[derive(Clone, Debug)]
 pub enum ContentDigest {
     Sha256(String),
+}
+
+impl ContentDigest {
+    pub async fn sha256_from_file(path: impl AsRef<Path>) -> Result<Self, std::io::Error> {
+        let mut file = tokio::fs::File::open(path).await?;
+        let mut hasher = Sha256::new();
+        let mut buf = [0; 4096];
+        loop {
+            let n = file.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+        Ok(Self::Sha256(format!("{:x}", hasher.finalize())))
+    }
 }
 
 impl std::fmt::Display for ContentDigest {

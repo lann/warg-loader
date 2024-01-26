@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1.0.79"
 bytes = "1.5.0"
 futures-util = { version = "0.3.29", features = ["io"] }
-libtest-mimic = "0.6.1"
+libtest-mimic = "0.7.0"
 tempfile = "3.9.0"
 tokio-test = "0.4.3"
 warg-loader = { path = "../.." }

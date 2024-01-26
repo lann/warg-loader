@@ -1,11 +1,11 @@
 mod toml;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use oci_distribution::client::ClientConfig as OciClientConfig;
 use secrecy::SecretString;
 
-use crate::{Error, PackageRef};
+use crate::{local::LocalConfig, oci::OciConfig, Error, PackageRef};
 
 /// Configuration for [`super::Client`].
 #[derive(Clone, Default)]
@@ -23,6 +23,19 @@ impl ClientConfig {
         crate::Client::new(self.clone())
     }
 
+    pub fn merge_config(&mut self, other: ClientConfig) -> &mut Self {
+        if let Some(default_registry) = other.default_registry {
+            self.default_registry(default_registry);
+        }
+        for (namespace, registry) in other.namespace_registries {
+            self.namespace_registry(namespace, registry);
+        }
+        for (registry, config) in other.registry_configs {
+            self.registry_configs.insert(registry, config);
+        }
+        self
+    }
+
     pub fn default_registry(&mut self, registry: impl Into<String>) -> &mut Self {
         self.default_registry = Some(registry.into());
         self
@@ -38,13 +51,25 @@ impl ClientConfig {
         self
     }
 
+    pub fn local_registry_config(
+        &mut self,
+        registry: impl Into<String>,
+        root: impl Into<PathBuf>,
+    ) -> &mut Self {
+        self.registry_configs.insert(
+            registry.into(),
+            RegistryConfig::Local(LocalConfig { root: root.into() }),
+        );
+        self
+    }
+
     pub fn oci_registry_config(
         &mut self,
         registry: impl Into<String>,
-        oci_client_config: Option<OciClientConfig>,
-        oci_credentials: Option<BasicCredentials>,
+        client_config: Option<OciClientConfig>,
+        credentials: Option<BasicCredentials>,
     ) -> Result<&mut Self, Error> {
-        if oci_client_config
+        if client_config
             .as_ref()
             .is_some_and(|cfg| cfg.platform_resolver.is_some())
         {
@@ -52,10 +77,10 @@ impl ClientConfig {
                 "oci_distribution::client::ClientConfig::platform_resolver not supported"
             ));
         }
-        let cfg = RegistryConfig {
-            oci_client_config,
-            oci_credentials,
-        };
+        let cfg = RegistryConfig::Oci(OciConfig {
+            client_config,
+            credentials,
+        });
         self.registry_configs.insert(registry.into(), cfg);
         Ok(self)
     }
@@ -77,28 +102,19 @@ impl ClientConfig {
 }
 
 /// Configuration for a specific registry.
-#[derive(Default)]
-pub struct RegistryConfig {
-    pub oci_client_config: Option<OciClientConfig>,
-    pub oci_credentials: Option<BasicCredentials>,
+#[derive(Clone, Debug)]
+pub enum RegistryConfig {
+    Local(LocalConfig),
+    Oci(OciConfig),
 }
 
-impl Clone for RegistryConfig {
-    fn clone(&self) -> Self {
-        let oci_client_config = self.oci_client_config.as_ref().map(|cfg| OciClientConfig {
-            protocol: cfg.protocol.clone(),
-            extra_root_certificates: cfg.extra_root_certificates.clone(),
-            platform_resolver: None,
-            ..*cfg
-        });
-        Self {
-            oci_client_config,
-            oci_credentials: self.oci_credentials.clone(),
-        }
+impl Default for RegistryConfig {
+    fn default() -> Self {
+        Self::Oci(Default::default())
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BasicCredentials {
     pub username: String,
     pub password: SecretString,

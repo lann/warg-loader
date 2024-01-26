@@ -11,28 +11,22 @@ async fn main() -> anyhow::Result<()> {
 
     let mut args = std::env::args();
     let arg0 = args.next().unwrap_or_else(|| "warg-loader".into());
-    let (Some(registry), Some(package), subcmd, version) = (
-        args.next(),
+    let (Some(package), subcmd, version) = (
         args.next(),
         args.next().unwrap_or("show".into()),
         args.next(),
     ) else {
-        bail!("usage: {arg0} <registry> <package> {{show | fetch}} [version]");
+        bail!("usage: {arg0} <package> {{show | fetch}} [version]");
     };
 
-    let client = ClientConfig::default()
-        .default_registry(&registry)
-        .oci_registry_config(
-            &registry,
-            Some(oci_distribution::client::ClientConfig {
-                protocol: oci_distribution::client::ClientProtocol::HttpsExcept(vec![
-                    "localhost:5000".into(),
-                ]),
-                ..Default::default()
-            }),
-            None,
-        )?
-        .to_client();
+    let client = {
+        let mut config = ClientConfig::default();
+        config.namespace_registry("wasi", "bytecodealliance.org");
+        if let Some(file_config) = ClientConfig::from_default_file()? {
+            config.merge_config(file_config);
+        }
+        config.to_client()
+    };
 
     let package: PackageRef = package.parse().context("invalid package ref format")?;
 
@@ -114,9 +108,7 @@ async fn fetch_package_content(
         !Path::new(&filename).exists(),
         "{filename:?} already exists"
     );
-    let mut content_stream = client
-        .stream_content(&package, &release.content_digest)
-        .await?;
+    let mut content_stream = client.stream_content(&package, &release).await?;
 
     let mut file = tokio::fs::File::create(filename).await?;
     while let Some(chunk) = content_stream.try_next().await? {

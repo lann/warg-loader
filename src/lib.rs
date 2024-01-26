@@ -1,5 +1,6 @@
 mod config;
 mod label;
+mod local;
 mod meta;
 mod oci;
 mod package;
@@ -11,7 +12,8 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::stream::BoxStream;
-use oci::OciSource;
+use local::LocalSource;
+use oci::{OciConfig, OciSource};
 use oci_distribution::errors::OciDistributionError;
 pub use semver::Version;
 
@@ -47,7 +49,7 @@ trait PackageSource {
     async fn stream_content(
         &mut self,
         package: &PackageRef,
-        content: &Digest,
+        release: &Release,
     ) -> Result<BoxStream<Result<Bytes, Error>>, Error>;
 }
 
@@ -86,10 +88,10 @@ impl Client {
     pub async fn stream_content(
         &mut self,
         package: &PackageRef,
-        content: &Digest,
+        release: &Release,
     ) -> Result<BoxStream<Result<Bytes, Error>>, Error> {
         let source = self.resolve_source(package).await?;
-        source.stream_content(package, content).await
+        source.stream_content(package, release).await
     }
 
     async fn resolve_source(
@@ -98,13 +100,31 @@ impl Client {
     ) -> Result<&mut dyn PackageSource, Error> {
         let registry = self.config.resolve_package_registry(package)?.to_owned();
         if !self.sources.contains_key(&registry) {
-            let source = self.build_oci_client(&registry).await?;
-            self.sources.insert(registry.clone(), Box::new(source));
+            let registry_config = self
+                .config
+                .registry_configs
+                .get(&registry)
+                .cloned()
+                .unwrap_or_default();
+
+            tracing::debug!("Resolved registry config: {registry_config:?}");
+
+            let source: Box<dyn PackageSource> = match registry_config {
+                config::RegistryConfig::Local(config) => Box::new(LocalSource::new(config)),
+                config::RegistryConfig::Oci(config) => {
+                    Box::new(self.build_oci_client(&registry, config).await?)
+                }
+            };
+            self.sources.insert(registry.clone(), source);
         }
         Ok(self.sources.get_mut(&registry).unwrap().as_mut())
     }
 
-    async fn build_oci_client(&mut self, registry: &str) -> Result<OciSource, Error> {
+    async fn build_oci_client(
+        &mut self,
+        registry: &str,
+        config: OciConfig,
+    ) -> Result<OciSource, Error> {
         tracing::debug!("Building new OCI client for {registry:?}");
 
         // Check registry metadata for OCI registry override
@@ -123,23 +143,16 @@ impl Client {
             }
         };
 
-        let registry_config = self
-            .config
-            .registry_configs
-            .get(registry)
-            .cloned()
-            .unwrap_or_default();
-
-        OciSource::new(registry.to_string(), registry_config, registry_meta)
+        OciSource::new(registry.to_string(), config, registry_meta)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("failed to get registry credentials: {0}")]
+    #[error("failed to get registry credentials: {0:#}")]
     CredentialError(anyhow::Error),
-    #[error("invalid config: {0}")]
+    #[error("invalid config: {0:#}")]
     InvalidConfig(anyhow::Error),
     #[error("invalid content digest: {0}")]
     InvalidContentDigest(String),
@@ -155,7 +168,7 @@ pub enum Error {
     OciError(#[from] OciDistributionError),
     #[error("no registry configured for namespace {0:?}")]
     NoRegistryForNamespace(Label),
-    #[error("registry metadata error: {0}")]
+    #[error("registry metadata error: {0:#}")]
     RegistryMeta(#[source] anyhow::Error),
     #[error("invalid version: {0}")]
     VersionError(#[from] semver::Error),

@@ -2,14 +2,12 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use futures_util::{stream::BoxStream, StreamExt, TryStreamExt};
-use oci_distribution::{secrets::RegistryAuth, Reference};
+use oci_distribution::{client::ClientConfig, secrets::RegistryAuth, Reference};
 use secrecy::ExposeSecret;
 use semver::Version;
 
 use crate::{
-    config::{BasicCredentials, RegistryConfig},
-    meta::RegistryMeta,
-    Digest, Error, PackageRef, PackageSource, Release,
+    config::BasicCredentials, meta::RegistryMeta, Error, PackageRef, PackageSource, Release,
 };
 
 const WASM_LAYER_MEDIA_TYPES: &[&str] = &[
@@ -17,9 +15,39 @@ const WASM_LAYER_MEDIA_TYPES: &[&str] = &[
     "application/vnd.wasm.content.layer.v1+wasm",
 ];
 
+#[derive(Default)]
+pub struct OciConfig {
+    pub client_config: Option<ClientConfig>,
+    pub credentials: Option<BasicCredentials>,
+}
+
+impl Clone for OciConfig {
+    fn clone(&self) -> Self {
+        let client_config = self.client_config.as_ref().map(|cfg| ClientConfig {
+            protocol: cfg.protocol.clone(),
+            extra_root_certificates: cfg.extra_root_certificates.clone(),
+            platform_resolver: None,
+            ..*cfg
+        });
+        Self {
+            client_config,
+            credentials: self.credentials.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for OciConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OciConfig")
+            .field("client_config", &self.client_config.as_ref().map(|_| "..."))
+            .field("credentials", &self.credentials)
+            .finish()
+    }
+}
+
 pub struct OciSource {
     client: oci_distribution::Client,
-    registry: String,
+    oci_registry: String,
     namespace_prefix: Option<String>,
     credentials: Option<BasicCredentials>,
 }
@@ -27,23 +55,22 @@ pub struct OciSource {
 impl OciSource {
     pub fn new(
         registry: String,
-        registry_config: RegistryConfig,
+        config: OciConfig,
         registry_meta: RegistryMeta,
     ) -> Result<Self, Error> {
-        let RegistryConfig {
-            oci_client_config,
-            oci_credentials: oci_client_credentials,
-        } = registry_config;
+        let OciConfig {
+            client_config,
+            credentials,
+        } = config;
+        let client = oci_distribution::Client::new(client_config.unwrap_or_default());
 
-        let client = oci_distribution::Client::new(oci_client_config.unwrap_or_default());
-
-        let oci_registry = registry_meta.oci_registry.clone().unwrap_or(registry);
+        let oci_registry = registry_meta.oci_registry.unwrap_or(registry);
 
         Ok(Self {
             client,
-            registry: oci_registry,
+            oci_registry,
             namespace_prefix: registry_meta.oci_namespace_prefix,
-            credentials: oci_client_credentials.clone(),
+            credentials,
         })
     }
 
@@ -55,7 +82,7 @@ impl OciSource {
             ));
         }
 
-        match docker_credential::get_credential(&self.registry) {
+        match docker_credential::get_credential(&self.oci_registry) {
             Ok(DockerCredential::UsernamePassword(username, password)) => {
                 return Ok(RegistryAuth::Basic(username, password));
             }
@@ -84,7 +111,7 @@ impl OciSource {
         let tag = version
             .map(|ver| ver.to_string())
             .unwrap_or_else(|| "latest".into());
-        Reference::with_tag(self.registry.clone(), repository, tag)
+        Reference::with_tag(self.oci_registry.clone(), repository, tag)
     }
 }
 
@@ -154,7 +181,7 @@ impl PackageSource for OciSource {
     async fn stream_content(
         &mut self,
         package: &PackageRef,
-        content: &Digest,
+        release: &Release,
     ) -> Result<BoxStream<Result<Bytes, Error>>, Error> {
         let reference = self.make_reference(package, None);
         self.client
@@ -166,7 +193,7 @@ impl PackageSource for OciSource {
             .await?;
         let stream = self
             .client
-            .pull_blob_stream(&reference, &content.to_string())
+            .pull_blob_stream(&reference, &release.content_digest.to_string())
             .await?;
         Ok(stream.map_err(Into::into).boxed())
     }

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use base64::{
@@ -8,7 +11,7 @@ use base64::{
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
-use crate::Error;
+use crate::{local::LocalConfig, oci::OciConfig, Error};
 
 use super::BasicCredentials;
 
@@ -21,6 +24,7 @@ impl super::ClientConfig {
     }
 
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, Error> {
+        tracing::debug!("Reading config file from {:?}", path.as_ref());
         Self::from_toml(std::fs::read_to_string(path)?.as_str())
     }
 
@@ -37,9 +41,12 @@ impl super::ClientConfig {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TomlConfig {
     default_registry: Option<String>,
+    #[serde(default)]
     namespace_registries: HashMap<String, String>,
+    #[serde(default)]
     registry: HashMap<String, TomlRegistryConfig>,
 }
 
@@ -65,25 +72,33 @@ impl TryFrom<TomlConfig> for super::ClientConfig {
 }
 
 #[derive(Deserialize)]
-struct TomlRegistryConfig {
-    oci_auth: Option<TomlAuth>,
+#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+enum TomlRegistryConfig {
+    Local { root: PathBuf },
+    Oci { auth: Option<TomlAuth> },
 }
 
 impl TryFrom<TomlRegistryConfig> for super::RegistryConfig {
     type Error = anyhow::Error;
 
     fn try_from(value: TomlRegistryConfig) -> Result<Self, Self::Error> {
-        let TomlRegistryConfig { oci_auth } = value;
-        let oci_client_credentials = oci_auth.map(TryInto::try_into).transpose()?;
-        Ok(Self {
-            oci_client_config: None,
-            oci_credentials: oci_client_credentials,
+        Ok(match value {
+            TomlRegistryConfig::Local { root } => Self::Local(LocalConfig { root }),
+            TomlRegistryConfig::Oci { auth } => {
+                let credentials = auth.map(TryInto::try_into).transpose()?;
+                Self::Oci(OciConfig {
+                    client_config: None,
+                    credentials,
+                })
+            }
         })
     }
 }
 
 #[derive(Deserialize)]
 #[serde(untagged)]
+#[serde(deny_unknown_fields)]
 enum TomlAuth {
     Base64(SecretString),
     UsernamePassword {
@@ -125,7 +140,7 @@ impl TryFrom<TomlAuth> for BasicCredentials {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::ClientConfig;
+    use crate::config::{ClientConfig, RegistryConfig};
 
     use super::*;
 
@@ -138,27 +153,29 @@ mod tests {
             wasi = "wasi.dev"
 
             [registry."example.com"]
-            oci_auth = { username = "open", password = "sesame" }
+            type = "oci"
+            auth = { username = "open", password = "sesame" }
 
             [registry."wasi.dev"]
-            oci_auth = "cGluZzpwb25n"
+            type = "oci"
+            auth = "cGluZzpwb25n"
         "#;
         let cfg = ClientConfig::from_toml(toml_config).unwrap();
 
         assert_eq!(cfg.default_registry.as_deref(), Some("example.com"));
         assert_eq!(cfg.namespace_registries["wasi"], "wasi.dev");
 
-        let BasicCredentials { username, password } = &cfg.registry_configs["example.com"]
-            .oci_credentials
-            .as_ref()
-            .unwrap();
+        let RegistryConfig::Oci(oci_config) = &cfg.registry_configs["example.com"] else {
+            panic!("not an oci config");
+        };
+        let BasicCredentials { username, password } = oci_config.credentials.as_ref().unwrap();
         assert_eq!(username, "open");
         assert_eq!(password.expose_secret(), "sesame");
 
-        let BasicCredentials { username, password } = cfg.registry_configs["wasi.dev"]
-            .oci_credentials
-            .as_ref()
-            .unwrap();
+        let RegistryConfig::Oci(oci_config) = &cfg.registry_configs["wasi.dev"] else {
+            panic!("not an oci config");
+        };
+        let BasicCredentials { username, password } = oci_config.credentials.as_ref().unwrap();
         assert_eq!(username, "ping");
         assert_eq!(password.expose_secret(), "pong");
     }
