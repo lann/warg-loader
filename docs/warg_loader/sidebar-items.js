@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["Digest","Error"],"mod":["oci_client"],"struct":["Client","ClientConfig","PackageRef","Release","Version"]};
