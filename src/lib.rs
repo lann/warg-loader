@@ -27,6 +27,7 @@ pub use crate::{
     release::{ContentDigest, Release},
 };
 use crate::{
+    config::RegistryConfig,
     label::{InvalidLabel, Label},
     meta::RegistryMeta,
 };
@@ -101,14 +102,19 @@ impl Client {
     ) -> Result<&mut dyn PackageSource, Error> {
         let registry = self.config.resolve_package_registry(package)?.to_owned();
         if !self.sources.contains_key(&registry) {
-            let registry_config = self
-                .config
-                .registry_configs
-                .get(&registry)
-                .cloned()
-                .unwrap_or_default();
+            let registry_config = self.config.registry_configs.get(&registry).cloned();
 
             tracing::debug!("Resolved registry config: {registry_config:?}");
+
+            let registry_meta = RegistryMeta::fetch_or_default(&registry).await;
+
+            let registry_config = registry_config.unwrap_or_else(|| {
+                if registry_meta.warg_url.is_some() {
+                    RegistryConfig::Warg(Default::default())
+                } else {
+                    RegistryConfig::Oci(Default::default())
+                }
+            });
 
             let source: Box<dyn PackageSource> = match registry_config {
                 config::RegistryConfig::Local(config) => Box::new(LocalSource::new(config)),
