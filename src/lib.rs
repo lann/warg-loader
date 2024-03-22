@@ -5,7 +5,7 @@ mod meta;
 mod oci;
 mod package;
 mod release;
-mod toml;
+mod warg;
 
 use std::collections::HashMap;
 
@@ -19,6 +19,7 @@ pub use semver::Version;
 
 /// Re-exported to ease configuration.
 pub use oci_distribution::client as oci_client;
+use warg::{WargConfig, WargSource};
 
 pub use crate::{
     config::ClientConfig,
@@ -114,6 +115,9 @@ impl Client {
                 config::RegistryConfig::Oci(config) => {
                     Box::new(self.build_oci_client(&registry, config).await?)
                 }
+                config::RegistryConfig::Warg(config) => {
+                    Box::new(self.build_warg_client(&registry, config).await?)
+                }
             };
             self.sources.insert(registry.clone(), source);
         }
@@ -126,24 +130,20 @@ impl Client {
         config: OciConfig,
     ) -> Result<OciSource, Error> {
         tracing::debug!("Building new OCI client for {registry:?}");
-
         // Check registry metadata for OCI registry override
-        let registry_meta = match RegistryMeta::fetch(registry).await {
-            Ok(Some(meta)) => {
-                tracing::debug!("Got registry metadata {meta:?}");
-                meta
-            }
-            Ok(None) => {
-                tracing::debug!("Metadata not found");
-                Default::default()
-            }
-            Err(err) => {
-                tracing::warn!("Error fetching registry metadata: {err}");
-                Default::default()
-            }
-        };
-
+        let registry_meta = RegistryMeta::fetch_or_default(registry).await;
         OciSource::new(registry.to_string(), config, registry_meta)
+    }
+
+    async fn build_warg_client(
+        &mut self,
+        registry: &str,
+        config: WargConfig,
+    ) -> Result<WargSource, Error> {
+        tracing::debug!("Building new Warg client for {registry:?}");
+        // Check registry metadata for OCI registry override
+        let registry_meta = RegistryMeta::fetch_or_default(registry).await;
+        WargSource::new(registry.to_string(), config, registry_meta)
     }
 }
 
@@ -172,4 +172,6 @@ pub enum Error {
     RegistryMeta(#[source] anyhow::Error),
     #[error("invalid version: {0}")]
     VersionError(#[from] semver::Error),
+    #[error("Warg error: {0}")]
+    WargError(#[from] warg_client::ClientError),
 }

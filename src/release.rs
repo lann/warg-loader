@@ -14,7 +14,7 @@ pub struct Release {
 
 #[derive(Clone, Debug)]
 pub enum ContentDigest {
-    Sha256(String),
+    Sha256 { hex: String },
 }
 
 impl ContentDigest {
@@ -29,14 +29,16 @@ impl ContentDigest {
             }
             hasher.update(&buf[..n]);
         }
-        Ok(Self::Sha256(format!("{:x}", hasher.finalize())))
+        Ok(Self::Sha256 {
+            hex: format!("{:x}", hasher.finalize()),
+        })
     }
 }
 
 impl std::fmt::Display for ContentDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ContentDigest::Sha256(hex) => write!(f, "sha256:{hex}"),
+            ContentDigest::Sha256 { hex } => write!(f, "sha256:{hex}"),
         }
     }
 }
@@ -62,7 +64,7 @@ impl<'a> TryFrom<&'a str> for ContentDigest {
                 "must be hex; got {invalid:?}"
             )));
         }
-        Ok(Self::Sha256(hex))
+        Ok(Self::Sha256 { hex })
     }
 }
 

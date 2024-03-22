@@ -11,9 +11,27 @@ const WELL_KNOWN_PATH: &str = ".well-known/warg/registry.json";
 pub struct RegistryMeta {
     pub oci_registry: Option<String>,
     pub oci_namespace_prefix: Option<String>,
+    pub warg_url: Option<String>,
 }
 
 impl RegistryMeta {
+    pub async fn fetch_or_default(domain: &str) -> Self {
+        match Self::fetch(domain).await {
+            Ok(Some(meta)) => {
+                tracing::debug!("Got registry metadata {meta:?}");
+                meta
+            }
+            Ok(None) => {
+                tracing::debug!("Metadata not found");
+                Default::default()
+            }
+            Err(err) => {
+                tracing::warn!("Error fetching registry metadata: {err}");
+                Default::default()
+            }
+        }
+    }
+
     pub async fn fetch(domain: &str) -> Result<Option<Self>, Error> {
         let scheme = if domain.starts_with("localhost:") {
             "http"

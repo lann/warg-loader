@@ -5,7 +5,7 @@ use std::{collections::HashMap, path::PathBuf};
 use oci_distribution::client::ClientConfig as OciClientConfig;
 use secrecy::SecretString;
 
-use crate::{local::LocalConfig, oci::OciConfig, Error, PackageRef};
+use crate::{local::LocalConfig, oci::OciConfig, warg::WargConfig, Error, PackageRef};
 
 /// Configuration for [`super::Client`].
 #[derive(Clone, Default)]
@@ -106,6 +106,7 @@ impl ClientConfig {
 pub enum RegistryConfig {
     Local(LocalConfig),
     Oci(OciConfig),
+    Warg(WargConfig),
 }
 
 impl Default for RegistryConfig {

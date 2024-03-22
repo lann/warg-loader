@@ -11,7 +11,7 @@ use base64::{
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
-use crate::{local::LocalConfig, oci::OciConfig, Error};
+use crate::{local::LocalConfig, oci::OciConfig, warg::WargConfig, Error};
 
 use super::BasicCredentials;
 
@@ -75,8 +75,16 @@ impl TryFrom<TomlConfig> for super::ClientConfig {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 enum TomlRegistryConfig {
-    Local { root: PathBuf },
-    Oci { auth: Option<TomlAuth> },
+    Local {
+        root: PathBuf,
+    },
+    Oci {
+        auth: Option<TomlAuth>,
+    },
+    Warg {
+        auth_token: Option<SecretString>,
+        config_file: Option<PathBuf>,
+    },
 }
 
 impl TryFrom<TomlRegistryConfig> for super::RegistryConfig {
@@ -90,6 +98,19 @@ impl TryFrom<TomlRegistryConfig> for super::RegistryConfig {
                 Self::Oci(OciConfig {
                     client_config: None,
                     credentials,
+                })
+            }
+            TomlRegistryConfig::Warg {
+                auth_token,
+                config_file,
+            } => {
+                let client_config = match config_file {
+                    Some(path) => warg_client::Config::from_file(path)?,
+                    None => warg_client::Config::from_default_file()?.unwrap_or_default(),
+                };
+                Self::Warg(WargConfig {
+                    auth_token,
+                    client_config,
                 })
             }
         })
