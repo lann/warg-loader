@@ -85,6 +85,20 @@ impl ClientConfig {
         Ok(self)
     }
 
+    pub fn warg_registry_config(
+        &mut self,
+        registry: impl Into<String>,
+        client_config: Option<warg_client::Config>,
+        auth_token: Option<impl Into<SecretString>>,
+    ) -> Result<&mut Self, Error> {
+        let cfg = RegistryConfig::Warg(WargConfig {
+            client_config: client_config.unwrap_or_default(),
+            auth_token: auth_token.map(Into::into),
+        });
+        self.registry_configs.insert(registry.into(), cfg);
+        Ok(self)
+    }
+
     pub(crate) fn resolve_package_registry(&self, package: &PackageRef) -> Result<&str, Error> {
         let namespace = package.namespace();
         tracing::debug!("Resolving registry for {namespace:?}");

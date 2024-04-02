@@ -13,8 +13,8 @@ use crate::{meta::RegistryMeta, Error, PackageRef, PackageSource, Release};
 
 #[derive(Clone, Debug, Default)]
 pub struct WargConfig {
-    pub auth_token: Option<SecretString>,
     pub client_config: warg_client::Config,
+    pub auth_token: Option<SecretString>,
 }
 
 pub struct WargSource {
