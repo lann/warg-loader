@@ -76,7 +76,7 @@ impl PackageSource for LocalSource {
         })
     }
 
-    async fn stream_content(
+    async fn stream_content_unvalidated(
         &mut self,
         package: &PackageRef,
         content: &Release,

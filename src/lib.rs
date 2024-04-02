@@ -69,7 +69,8 @@ impl Client {
         source.get_release(package, version).await
     }
 
-    /// Returns a [`BoxStream`] of content chunks.
+    /// Returns a [`BoxStream`] of content chunks. Contents are validated
+    /// against the given [`Release::content_digest`].
     pub async fn stream_content(
         &mut self,
         package: &PackageRef,
@@ -143,6 +144,8 @@ pub enum Error {
     CredentialError(anyhow::Error),
     #[error("invalid config: {0:#}")]
     InvalidConfig(anyhow::Error),
+    #[error("invalid content: {0}")]
+    InvalidContent(String),
     #[error("invalid content digest: {0}")]
     InvalidContentDigest(String),
     #[error("invalid label: {0}")]

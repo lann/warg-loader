@@ -86,7 +86,7 @@ impl PackageSource for WargSource {
         })
     }
 
-    async fn stream_content(
+    async fn stream_content_unvalidated(
         &mut self,
         _package: &PackageRef,
         release: &Release,

@@ -178,7 +178,7 @@ impl PackageSource for OciSource {
         })
     }
 
-    async fn stream_content(
+    async fn stream_content_unvalidated(
         &mut self,
         package: &PackageRef,
         release: &Release,
