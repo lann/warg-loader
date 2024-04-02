@@ -45,7 +45,7 @@ impl super::ClientConfig {
 struct TomlConfig {
     default_registry: Option<String>,
     #[serde(default)]
-    namespace_registries: HashMap<String, String>,
+    namespace: HashMap<String, TomlNamespaceConfig>,
     #[serde(default)]
     registry: HashMap<String, TomlRegistryConfig>,
 }
@@ -56,9 +56,13 @@ impl TryFrom<TomlConfig> for super::ClientConfig {
     fn try_from(value: TomlConfig) -> Result<Self, Self::Error> {
         let TomlConfig {
             default_registry,
-            namespace_registries,
+            namespace,
             registry,
         } = value;
+        let namespace_registries = namespace
+            .into_iter()
+            .map(|(name, config)| (name, config.registry))
+            .collect();
         let registry_configs = registry
             .into_iter()
             .map(|(k, v)| Ok((k, v.try_into()?)))
@@ -69,6 +73,12 @@ impl TryFrom<TomlConfig> for super::ClientConfig {
             registry_configs,
         })
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TomlNamespaceConfig {
+    registry: String,
 }
 
 #[derive(Deserialize)]
@@ -170,8 +180,8 @@ mod tests {
         let toml_config = r#"
             default_registry = "example.com"
 
-            [namespace_registries]
-            wasi = "wasi.dev"
+            [namespace.wasi]
+            registry = "wasi.dev"
 
             [registry."example.com"]
             type = "oci"
