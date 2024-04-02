@@ -7,7 +7,7 @@ use secrecy::ExposeSecret;
 use semver::Version;
 
 use crate::{
-    config::BasicCredentials, meta::RegistryMeta, Error, PackageRef, PackageSource, Release,
+    config::BasicCredentials, meta::RegistryMeta, source::PackageSource, Error, PackageRef, Release,
 };
 
 const WASM_LAYER_MEDIA_TYPES: &[&str] = &[

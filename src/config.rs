@@ -5,7 +5,10 @@ use std::{collections::HashMap, path::PathBuf};
 use oci_distribution::client::ClientConfig as OciClientConfig;
 use secrecy::SecretString;
 
-use crate::{local::LocalConfig, oci::OciConfig, warg::WargConfig, Error, PackageRef};
+use crate::{
+    source::{local::LocalConfig, oci::OciConfig, warg::WargConfig},
+    Error, PackageRef,
+};
 
 /// Configuration for [`super::Client`].
 #[derive(Clone, Default)]

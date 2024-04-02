@@ -1,25 +1,25 @@
 mod config;
 mod label;
-mod local;
 mod meta;
-mod oci;
 mod package;
 mod release;
-mod warg;
+mod source;
 
 use std::collections::HashMap;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::stream::BoxStream;
-use local::LocalSource;
-use oci::{OciConfig, OciSource};
 use oci_distribution::errors::OciDistributionError;
 pub use semver::Version;
+use source::{
+    local::LocalSource,
+    oci::{OciConfig, OciSource},
+    warg::{WargConfig, WargSource},
+    PackageSource,
+};
 
 /// Re-exported to ease configuration.
 pub use oci_distribution::client as oci_client;
-use warg::{WargConfig, WargSource};
 
 pub use crate::{
     config::ClientConfig,
@@ -36,23 +36,6 @@ use crate::{
 pub struct Client {
     config: ClientConfig,
     sources: HashMap<String, Box<dyn PackageSource>>,
-}
-
-#[async_trait]
-trait PackageSource {
-    async fn list_all_versions(&mut self, package: &PackageRef) -> Result<Vec<Version>, Error>;
-
-    async fn get_release(
-        &mut self,
-        package: &PackageRef,
-        version: &Version,
-    ) -> Result<Release, Error>;
-
-    async fn stream_content(
-        &mut self,
-        package: &PackageRef,
-        release: &Release,
-    ) -> Result<BoxStream<Result<Bytes, Error>>, Error>;
 }
 
 impl Client {

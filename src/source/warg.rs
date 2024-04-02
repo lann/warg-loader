@@ -9,7 +9,7 @@ use warg_client::{
 };
 use warg_protocol::registry::PackageName;
 
-use crate::{meta::RegistryMeta, Error, PackageRef, PackageSource, Release};
+use crate::{meta::RegistryMeta, source::PackageSource, Error, PackageRef, Release};
 
 #[derive(Clone, Debug, Default)]
 pub struct WargConfig {

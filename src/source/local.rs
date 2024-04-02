@@ -6,7 +6,7 @@ use futures_util::{stream::BoxStream, StreamExt, TryStreamExt};
 use semver::Version;
 use tokio_util::io::ReaderStream;
 
-use crate::{ContentDigest, Error, PackageRef, PackageSource, Release};
+use crate::{source::PackageSource, ContentDigest, Error, PackageRef, Release};
 
 #[derive(Clone, Debug)]
 pub struct LocalConfig {

@@ -11,7 +11,10 @@ use base64::{
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
-use crate::{local::LocalConfig, oci::OciConfig, warg::WargConfig, Error};
+use crate::{
+    source::{local::LocalConfig, oci::OciConfig, warg::WargConfig},
+    Error,
+};
 
 use super::BasicCredentials;
 
