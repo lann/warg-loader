@@ -50,6 +50,7 @@ pub struct OciSource {
     oci_registry: String,
     namespace_prefix: Option<String>,
     credentials: Option<BasicCredentials>,
+    registry_auth: Option<RegistryAuth>,
 }
 
 impl OciSource {
@@ -71,10 +72,40 @@ impl OciSource {
             oci_registry,
             namespace_prefix: registry_meta.oci_namespace_prefix,
             credentials,
+            registry_auth: None,
         })
     }
 
-    fn get_auth(&self) -> Result<RegistryAuth, Error> {
+    async fn auth(&mut self, reference: &Reference) -> Result<RegistryAuth, Error> {
+        if self.registry_auth.is_none() {
+            let mut auth = self.get_credentials()?;
+            // Preflight auth to check for validity; this isn't wasted
+            // effort because the oci_distribution::Client caches it
+            use oci_distribution::errors::OciDistributionError::AuthenticationFailure;
+            use oci_distribution::RegistryOperation::Pull;
+            match self.client.auth(reference, &auth, Pull).await {
+                Ok(_) => (),
+                Err(err @ AuthenticationFailure(_)) if auth != RegistryAuth::Anonymous => {
+                    // The failed credentials might not even be required for this image; retry anonymously
+                    if self
+                        .client
+                        .auth(reference, &RegistryAuth::Anonymous, Pull)
+                        .await
+                        .is_ok()
+                    {
+                        auth = RegistryAuth::Anonymous;
+                    } else {
+                        return Err(err.into());
+                    }
+                }
+                Err(err) => return Err(err.into()),
+            }
+            self.registry_auth = Some(auth);
+        }
+        Ok(self.registry_auth.clone().unwrap())
+    }
+
+    fn get_credentials(&self) -> Result<RegistryAuth, Error> {
         if let Some(BasicCredentials { username, password }) = &self.credentials {
             return Ok(RegistryAuth::Basic(
                 username.clone(),
@@ -125,10 +156,8 @@ impl PackageSource for OciSource {
         let reference = self.make_reference(package, None);
 
         tracing::debug!("Listing tags for OCI reference {reference:?}");
-        let resp = self
-            .client
-            .list_tags(&reference, &self.get_auth()?, None, None)
-            .await?;
+        let auth = self.auth(&reference).await?;
+        let resp = self.client.list_tags(&reference, &auth, None, None).await?;
         tracing::trace!("List tags response: {resp:?}");
 
         // Return only tags that parse as valid semver versions.
@@ -154,10 +183,8 @@ impl PackageSource for OciSource {
         let reference = self.make_reference(package, Some(version));
 
         tracing::debug!("Fetching image manifest for OCI reference {reference:?}");
-        let (manifest, _digest) = self
-            .client
-            .pull_image_manifest(&reference, &self.get_auth()?)
-            .await?;
+        let auth = self.auth(&reference).await?;
+        let (manifest, _digest) = self.client.pull_image_manifest(&reference, &auth).await?;
         tracing::trace!("Got manifest {manifest:?}");
 
         // Pending standardization of an OCI manifest/config format, a package
@@ -188,13 +215,7 @@ impl PackageSource for OciSource {
         release: &Release,
     ) -> Result<BoxStream<Result<Bytes, Error>>, Error> {
         let reference = self.make_reference(package, None);
-        self.client
-            .auth(
-                &reference,
-                &self.get_auth()?,
-                oci_distribution::RegistryOperation::Pull,
-            )
-            .await?;
+        self.auth(&reference).await?;
         let stream = self
             .client
             .pull_blob_stream(&reference, &release.content_digest.to_string())
