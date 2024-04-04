@@ -82,7 +82,8 @@ impl OciSource {
             ));
         }
 
-        match docker_credential::get_credential(&self.oci_registry) {
+        let server_url = format!("https://{}", self.oci_registry);
+        match docker_credential::get_credential(&server_url) {
             Ok(DockerCredential::UsernamePassword(username, password)) => {
                 return Ok(RegistryAuth::Basic(username, password));
             }
@@ -90,6 +91,9 @@ impl OciSource {
                 return Err(Error::CredentialError(anyhow::anyhow!(
                     "identity tokens not supported"
                 )));
+            }
+            Err(err @ CredentialRetrievalError::HelperFailure { .. }) => {
+                tracing::info!("Docker credential helper failed: {err:?}");
             }
             Err(
                 CredentialRetrievalError::ConfigNotFound
