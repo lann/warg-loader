@@ -1,3 +1,7 @@
+> 
+| ⚠️ Migrated to https://github.com/bytecodealliance/wasm-pkg-tools/tree/main/crates/wasm-pkg-loader ⚠️ |
+|--|
+
 # Warg Loader
 
 A minimal Warg Package Registry interface for read-only consumers.
